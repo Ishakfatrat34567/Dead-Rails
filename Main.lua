@@ -9,7 +9,6 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 local CachedNPCs = {}
-local DrawingBoxes = {}
 
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Color = Color3.fromRGB(255, 0, 0)
@@ -23,36 +22,29 @@ FOVCircle.Radius = 200
 _G.NPCESP = false
 _G.NPCAimbot = false
 _G.AimbotFOV = 200
-local RANGE = 400
+local RANGE = 200 -- Lowered range to reduce load
 
-local function createBox()
-	return {
-		Top = Drawing.new("Line"),
-		Bottom = Drawing.new("Line"),
-		Left = Drawing.new("Line"),
-		Right = Drawing.new("Line")
-	}
-end
-
+-- 👁️ Refresh NPC List
 local function refreshNPCList()
 	local camPos = Camera.CFrame.Position
 	CachedNPCs = {}
 	for _, npc in pairs(workspace:GetDescendants()) do
 		if npc:IsA("Model") and npc:FindFirstChild("Humanoid") and npc:FindFirstChild("Head") and not Players:GetPlayerFromCharacter(npc) then
 			local hrp = npc:FindFirstChild("HumanoidRootPart")
-			if hrp and (hrp.Position - camPos).Magnitude <= RANGE then
+			if hrp and (hrp.Position - camPos).Magnitude <= RANGE and npc.Humanoid.Health > 0 then
 				table.insert(CachedNPCs, npc)
 			end
 		end
 	end
 end
 
+-- 🎯 Closest Target
 local function getClosestAliveNPC()
 	local closest, dist = nil, math.huge
 	local camPos = Camera.CFrame.Position
 	for _, npc in pairs(CachedNPCs) do
 		local hum = npc:FindFirstChild("Humanoid")
-		if hum and hum.Health > 0 and hum.Parent ~= nil then
+		if hum and hum.Health > 0 then
 			local head = npc.Head.Position
 			if (head - camPos).Magnitude <= RANGE then
 				local screenPos, visible = Camera:WorldToViewportPoint(head)
@@ -69,18 +61,18 @@ local function getClosestAliveNPC()
 	return closest
 end
 
+-- 📦 UI Tabs
 local MainTab = Window:NewTab("Main")
 local MainSection = MainTab:NewSection("Visuals & Aimbot")
 
-MainSection:NewToggle("NPC ESP", "Outlines NPCs", function(state)
+MainSection:NewToggle("NPC ESP", "Highlights NPCs with glow", function(state)
 	_G.NPCESP = state
 	if not state then
-		for _, box in pairs(DrawingBoxes) do
-			for _, line in pairs(box) do
-				line:Remove()
+		for _, npc in pairs(CachedNPCs) do
+			if npc:FindFirstChild("ESP_Highlight") then
+				npc.ESP_Highlight:Destroy()
 			end
 		end
-		table.clear(DrawingBoxes)
 	end
 end)
 
@@ -101,12 +93,16 @@ BondSection:NewButton("Run AutoBond Script", "Executes Luarmor Loader and hides 
 	loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/869d818021af0445799bf14959327df4.lua"))()
 end)
 
+-- 🔄 Refresh NPC List Loop
 task.spawn(function()
 	while true do
 		refreshNPCList()
-		task.wait(1.5)
+		task.wait(3) -- Slower refresh for performance
 	end
 end)
+
+-- 💡 Highlight ESP (Patched)
+local lastESPCheck = 0
 
 RunService.Heartbeat:Connect(function()
 	local camPos = Camera.CFrame.Position
@@ -117,48 +113,35 @@ RunService.Heartbeat:Connect(function()
 		FOVCircle.Radius = _G.AimbotFOV
 	end
 
-	if _G.NPCESP then
+	-- Highlight ESP
+	if _G.NPCESP and tick() - lastESPCheck >= 0.5 then
+		lastESPCheck = tick()
+
 		for _, npc in pairs(CachedNPCs) do
-			local hum = npc:FindFirstChild("Humanoid")
-			local hrp = npc:FindFirstChild("HumanoidRootPart")
-			if hum and hum.Health > 0 and hrp and (hrp.Position - camPos).Magnitude <= RANGE then
-				local pos, vis = Camera:WorldToViewportPoint(hrp.Position)
-				if vis then
-					if not DrawingBoxes[npc] then
-						DrawingBoxes[npc] = createBox()
+			pcall(function()
+				local hum = npc:FindFirstChild("Humanoid")
+				local head = npc:FindFirstChild("Head")
+				if hum and hum.Health > 0 and head then
+					if not npc:FindFirstChild("ESP_Highlight") then
+						local hl = Instance.new("Highlight")
+						hl.Name = "ESP_Highlight"
+						hl.Adornee = npc
+						hl.FillColor = Color3.fromRGB(255, 0, 0)
+						hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+						hl.FillTransparency = 0.4
+						hl.OutlineTransparency = 0
+						hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+						hl.Parent = npc
 					end
-
-					local size = Vector3.new(2, 3, 1.5)
-					local box = DrawingBoxes[npc]
-					local c1 = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(-size.X, size.Y, 0))
-					local c2 = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(size.X, size.Y, 0))
-					local c3 = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(-size.X, -size.Y, 0))
-					local c4 = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(size.X, -size.Y, 0))
-
-					box.Top.From = Vector2.new(c1.X, c1.Y)
-					box.Top.To = Vector2.new(c2.X, c2.Y)
-					box.Bottom.From = Vector2.new(c3.X, c3.Y)
-					box.Bottom.To = Vector2.new(c4.X, c4.Y)
-					box.Left.From = Vector2.new(c1.X, c1.Y)
-					box.Left.To = Vector2.new(c3.X, c3.Y)
-					box.Right.From = Vector2.new(c2.X, c2.Y)
-					box.Right.To = Vector2.new(c4.X, c4.Y)
-
-					for _, line in pairs(box) do
-						line.Visible = true
-						line.Color = Color3.fromRGB(255, 0, 0)
-						line.Thickness = 1.5
-					end
+				elseif npc:FindFirstChild("ESP_Highlight") then
+					npc.ESP_Highlight:Destroy()
 				end
-			elseif DrawingBoxes[npc] then
-				for _, line in pairs(DrawingBoxes[npc]) do
-					line.Visible = false
-				end
-			end
+			end)
 		end
 	end
 end)
 
+-- 🎯 Aimbot Locking
 RunService.Heartbeat:Connect(function()
 	if _G.NPCAimbot and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
 		local npc = getClosestAliveNPC()
@@ -167,5 +150,7 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 end)
+
+-- ✅ Notifs
 game.StarterGui:SetCore("SendNotification", {Title = "IshkebHub", Text = "Script Loaded Successfully!", Duration = 5})
 game.StarterGui:SetCore("SendNotification", {Title = "Heads up!", Text = "Heads up! if you want to use autobond move the menu to the side", Duration = 15})
